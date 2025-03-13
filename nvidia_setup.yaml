@@ -1,0 +1,76 @@
+- name: Install Nvidia Driver
+  hosts: all
+  vars:
+    nvidia_driver_version: 550.127.05
+    register_system: false
+  gather_facts: true
+  become: true
+  tasks:
+    - name: RHSM Management
+      when: register_system
+      block:
+        - name: Allow subscription manager to manage system
+          ansible.builtin.shell:
+            cmd: subscription-manager config --rhsm.manage_repos=1
+
+        - name: Register system
+          community.general.redhat_subscription:
+            state: present
+            username: "{{ rhsm_uname }}"
+            password: "{{ rhsm_passwd }}"
+
+        - name: Enable CRB
+          community.general.rhsm_repository:
+            name: codeready-builder-for-rhel-{{ ansible_distribution_major_version }}-{{ ansible_architecture }}-rpms
+            state: present
+
+    - name: Update system
+      ansible.builtin.dnf:
+        name: "*"
+        update_only: true
+        state: latest
+
+    - name: Reboot system
+      ansible.builtin.reboot:
+
+    - name: Install EPEL and Needed Packages
+      ansible.builtin.dnf:
+        pkg:
+          - https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm
+          - kernel-devel
+          - kernel-headers
+          - git
+          - git-lfs
+          - podman
+          - https://us.download.nvidia.com/tesla/{{ nvidia_driver_version }}/nvidia-driver-local-repo-rhel{{ ansible_distribution_major_version }}-{{ nvidia_driver_version }}-1.0-1.x86_64.rpm
+        state: present
+        disable_gpg_check: true
+
+    - name: Add Nvidia Container Toolkit repo
+      ansible.builtin.yum_repository:
+        baseurl:
+          - https://nvidia.github.io/libnvidia-container/stable/rpm/$basearch
+        name: nvidia-container-toolkit
+        description: Nvidia Container Toolkit
+        enabled: true
+        gpgcheck: false
+        sslverify: true
+        gpgkey:
+          - https://nvidia.github.io/libnvidia-container/gpgkey
+        repo_gpgcheck: true
+
+
+    - name: Install Nvidia Drivers
+      ansible.builtin.dnf:
+        name:
+          - "@nvidia-driver:latest-dkms"
+          - nvidia-container-toolkit
+        state: present
+
+    - name: Reboot
+      ansible.builtin.reboot:
+
+    - name: Initialize Nvidia Container Toolkit
+      ansible.builtin.shell:
+        cmd: nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+        
